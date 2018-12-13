@@ -1,0 +1,323 @@
+---
+title: "Projekt z analizy danych"
+output:
+  flexdashboard::flex_dashboard:
+      orientation: rows
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(stylo)
+library(dplyr)
+library(corrplot)
+library(ggplot2)
+library(DT)
+library(caret)
+library(RANN)
+library(readxl)
+library(C50)
+library(data.table)
+library(randomForest)
+```
+  
+Biblioteki
+=======================================================================
+
+### Biblioteki
+
+```{r}
+usedPackages <- as.data.frame(installed.packages()[,c(1,3:4)])
+nrow(usedPackages)
+knitr::kable(usedPackages)
+```
+
+```{r}
+
+```
+
+Przygotowanie danych
+=======================================================================
+
+<h5> 3. Kod pozwalaj¹cy wczytaæ dane z pliku.</h5>
+```{r}
+#myData <- read.csv(file="/all_summary.csv", header = TRUE, sep = ";", nrow=5000)
+myData <- read.csv("https://www.dropbox.com/s/t6itn0c2an2axu4/all_summary2.csv?dl=1",header = TRUE, sep = ";", nrow=5000, blank.lines.skip = TRUE)
+nrow(myData)
+ncol(myData)
+##head(myData)
+```
+<h5> 4. Kod usuwaj¹cy z danych wiersze posiadaj¹ce wartoœæ zmiennej res_name równ¹: “UNK”, “UNX”, “UNL”, “DUM”, “N”, “BLOB”, “ALA”, “ARG”, “ASN”, “ASP”, “CYS”, “GLN”, “GLU”, “GLY”, “HIS”, “ILE”, “LEU”, “LYS”, “MET”, “MSE”, “PHE”, “PRO”, “SEC”, “SER”, “THR”, “TRP”, “TYR”, “VAL”, “DA”, “DG”, “DT”, “DC”, “DU”, “A”, “G”, “T”, “C”, “U”, “HOH”, “H20”, “WAT”</h5>
+```{r}
+newData <- subset(myData, !(res_name %in% c('UNK','UNX','UNL','DUM','N','BLOB','ALA','ARG','ASN','ASP','CYS','GLN','GLU','GLY','HIS','ILE','LEU','LYS','MET','MSE','PHE','PRO','SEC','SER','THR','TRP','TYR','VAL','DA','DG','DT','DC','DU','A','G','T','C','U','HOH','H20','WAT')))
+nrow(newData)
+```
+<h5> 5. Kod przetwarzaj¹cy brakuj¹ce dane.</h5>
+```{r}
+nrow(newData)
+newData <- newData[!is.na(newData$res_name),]
+newData <- newData[!is.na(newData$res_volume_coverage),]
+nrow(newData)
+```
+<h5> 6. Rozmiar zbioru.</h5>
+```{r}
+nrow(newData)
+ncol(newData)
+##summary(newData)
+```
+
+<h5> 7. Kod ograniczaj¹cy liczbê klas (res_name) do 50 najpopularniejszych wartoœci.</h5>
+<p>Znajdowanie 50 najpopularniejszych wartoœci res_name</p>
+```{r}
+mostPopular <- sort(table(newData$res_name), decreasing = TRUE)
+mostPopular[1:50]
+mostPopularNames <- names(sort(table(newData$res_name), decreasing = TRUE))
+mostPopularNames[(1:50)]
+```
+<p>Ograniczenie danych</p>
+```{r}
+nrow(newData)
+newData <- subset(newData, (res_name %in% mostPopularNames))
+nrow(newData)
+```
+
+<h5>9. Okreœlenie ile przyk³adów ma ka¿da z klas (res_name).</h5>
+```{r}
+resNames <- sort(table(newData$res_name), decreasing = TRUE)
+resNames[1:length(resNames)]
+```
+
+
+Korelacje
+=======================================================================
+
+<h5>8. Korelacje miedzy zmiennymi.</h5>
+
+```{r}
+numericColumns <- dplyr::select_if(newData, is.numeric)
+corr <- numericColumns[,0:length(numericColumns)]
+corrDF <- as.data.frame(as.table(cor(corr)))
+orderedCorr <- corrDF[order(-corrDF$Freq),] 
+orderedCorr <- subset(orderedCorr, Var1 != Var2)
+orderedCorr <- subset(orderedCorr, !is.na(Freq))
+orderedCorr <- orderedCorr[!duplicated(t(apply(orderedCorr, 1, sort))),]
+headCorr <- head(orderedCorr, 15)
+knitr::kable(headCorr)
+knitr::kable(tail(orderedCorr))
+
+for(row in 9:14)
+{
+  x <- as.vector(headCorr$Var1[[row]])
+  y <- as.vector(headCorr$Var2[[row]])
+  plot(newData[,x], newData[,y], xlab=x, ylab=y)
+}
+
+##aasd <- subset(corrDF, Var1 %in% c('blob_volume_coverage'))
+##aasd <- subset(aasd, Freq > 0.5)
+##head(aasd,50)
+##aasd <- subset(corrDF, Var1 %in% c('blob_coverage'))
+##resIdCor <- subset(corrDF, corrDF$Var1 %in% c('res_name'))
+##resIdCor <- resIdCor[order(-resIdCor$Freq),] 
+##head(resIdCor, 20)
+##resIdCor <- subset(orderedCorr, Var1 == "res_id")
+##resIdCor <- resIdCor[order(-resIdCor$Freq),] 
+##head(resIdCor, 20)
+##rex <- cor.test(newData$res_id, newData$chain_id, method = "pearson")
+##rex
+##cor(corr, use="complete.obs", method="kendall") 
+##corrDF <- corrDF[rownames(corrDF) %like% "FoFc_min", ]
+##nrow(corrDF)
+##corrDF[grep("FoFc_min", rownames(corrDF)), ]
+##knitr::kable(corrDF)
+```
+
+Rozklady liczb atomow
+=======================================================================
+
+<h5>10. Wykresy rozkladow liczby atomow (local_res_atom_non_h_count) i elektronow (local_res_atom_non_h_electron_sum).</h5>
+
+
+Row
+-----------------------------------------------------------------------
+
+### local_res_atom_non_h_count
+
+```{r, echo=FALSE}
+ggplot(newData, aes(newData[,"local_res_atom_non_h_count"])) + geom_density()
+
+```
+
+### local_res_atom_non_h_electron_sum
+
+```{r, echo=FALSE}
+ggplot(newData, aes(newData[,"local_res_atom_non_h_electron_sum"])) + geom_density()
+```
+
+Row
+-----------------------------------------------------------------------
+
+### local_res_atom_non_h_count
+
+```{r, echo=FALSE}
+qplot(res_id, local_res_atom_non_h_count, data = newData)
+```
+
+### local_res_atom_non_h_electron_sum
+
+```{r, echo=FALSE}
+qplot(res_id, local_res_atom_non_h_electron_sum, data = newData)
+```
+
+Niezgodnosci liczb atomow
+=======================================================================
+
+### Niezgodnosci liczb atomow
+
+```{r}
+atomsDiffs <- select(newData, res_id, res_name, local_res_atom_non_h_count , dict_atom_non_h_count)
+atomsDiffs <- mutate(atomsDiffs,diff=local_res_atom_non_h_count - dict_atom_non_h_count)
+atomsDiffs <- atomsDiffs[order(atomsDiffs$diff, decreasing=FALSE), ]
+
+prettyTable <- function(table_df, round_columns=numeric(), round_digits=2) {
+    DT::datatable(table_df, style="bootstrap", filter = "top", rownames = FALSE, extensions = "Buttons", options = list(dom = 'Bfrtip', buttons = c('copy', 'csv', 'excel', 'pdf', 'print'))) %>%
+    formatRound(round_columns, round_digits)
+}
+prettyTable(head(atomsDiffs, 10))
+```
+
+### Niezgodnosci liczb elektronow
+
+```{r}
+electronDiffs <- select(newData, res_id, res_name, local_res_atom_non_h_electron_sum, dict_atom_non_h_electron_sum)
+
+
+electronDiffs <- mutate(electronDiffs,diff=local_res_atom_non_h_electron_sum - dict_atom_non_h_electron_sum)
+electronDiffs <- electronDiffs[order(electronDiffs$diff, decreasing=FALSE), ]
+
+
+prettyTable(head(electronDiffs, 10))
+```
+
+
+Rozklad wartosci kolumn part_01
+=======================================================================
+
+
+Row {data-height=50}
+-----------------------------------------------------------------------
+```{r, echo=FALSE}
+strangeVar <-  dplyr::select(newData, res_id, starts_with("part_01"))
+selectInput("column", label = "Kolumna:",
+            choices = colnames(strangeVar)[2:length(colnames(strangeVar))], selected = "part_01_shape_sqrt_E1")
+```
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Density
+```{r, echo=FALSE}
+renderPlot({
+  helperMean <- mean(strangeVar[,input$column], na.rm=T)
+  ggplot(strangeVar, aes(strangeVar[,input$column], xlab=input$column)) + geom_density() +   geom_vline(aes(xintercept=helperMean), color="red", linetype="dashed", size=1, show_guide = TRUE) +  geom_text(aes(x=mean(strangeVar[,input$column], na.rm=T), label=round(helperMean,2), y=0), colour="blue", angle=0, text=element_text(size=12))
+})
+```
+
+### res_id dist
+```{r, echo=FALSE}
+renderPlot({
+  qplot(strangeVar[,1], strangeVar[,input$column], data = strangeVar, ylab=  input$column, xlab =colnames(strangeVar)[1] ) + stat_summary(fun.y=mean, geom="point", group="res_id", color="red", fill="red") 
+})
+```
+
+
+Predykcja
+=======================================================================
+
+Row {.tabset}
+-----------------------------------------------------------------------
+### Training
+```{r}
+numericCols <- numericColumns %>% select(-one_of(c("weight_col","title","pbd_code","res_name","res_id","chain_id","local_BAa","local_NPa","local_Ra","local_RGa","local_SRGa","local_CCSa","local_CCPa","local_ZOa","local_ZDa","local_ZD_minus_a","local_ZD_plus_a","local_res_atom_count","local_res_atom_non_h_count","local_res_atom_non_h_occupancy_sum", "local_res_atom_non_h_electron_occupancy_sum","local_res_atom_C_count","local_res_atom_N_count", "local_res_atom_O_count","local_res_atom_S_count","dict_atom_non_h_count","dict_atom_non_h_electron_sum","dict_atom_C_count","dict_atom_N_count", "dict_atom_O_count","dict_atom_S_count","fo_col","fc_col","weight_col","grid_space","solvent_radius","solvent_opening_radius","part_step_FoFc_std_min","part_step_FoFc_std_max","part_step_FoFc_std_step")))
+
+numericCols <- as.data.frame(numericCols)
+class(numericCols)
+nrow(numericCols)
+set.seed(100)
+inTrain <- createDataPartition(y = numericCols$local_electrons, 
+                               p = 0.8, list = FALSE)
+training <- numericCols[inTrain,]
+testing <- numericCols[-inTrain,]
+colNo = which( colnames(training)=="local_res_atom_non_h_electron_sum" )
+preProcValues <- preProcess(training, method = c("knnImpute","center","scale"))
+set.seed(100)
+train_processed <- predict(preProcValues, training)
+my_lm = train(train_processed[,-colNo], train_processed[,colNo],
+               method = "lm",
+               preProc = c("center", "scale")
+              )
+
+```
+
+### Results
+```{r}
+my_lm
+
+p <- predict(my_lm, testing)
+summary(p)
+
+Rsquared <- summary(my_lm)$r.squared
+print(Rsquared)
+
+memory.limit()
+memory.limit(size = 56000)
+```
+
+Klasyfikator
+=======================================================================
+
+Row {.tabset}
+-----------------------------------------------------------------------
+ 
+### Preparing data
+```{r}
+gc()
+newData <- subset(myData, res_name %in% mostPopularNames[(1:50)])
+nrow(newData)
+newData <- newData[!is.na(newData$res_name),]
+newData <- newData[!is.na(newData$res_volume_coverage),]
+newData <- newData[!is.na(newData$part_01_shape_O3_norm),]
+nrow(newData)
+newData <- as.data.frame(newData)
+newData <- droplevels(newData)
+
+inTrain <- createDataPartition(y = newData$res_name, p = 0.8, list = FALSE)
+
+training <- newData[inTrain,]
+testing <- newData[-inTrain,]
+control <- trainControl(method="cv", number=10)
+metric <- "Accuracy"
+```
+
+### Random forest
+```{r}
+fit.rf <- train(res_name~res_volume_coverage+local_max_over_std+resolution+local_skewness+local_std+local_mean+local_volume+local_electrons+local_max+res_volume_coverage_second, data=training, method="rf", metric=metric, trControl=control,na.action = na.pass)
+
+fit.rf
+```
+
+
+### Linear Discriminant Analysis
+```{r}
+#fit.lda <- train(res_name ~ res_volume_coverage + local_res_atom_non_h_count + local_res_atom_non_h_electron_sum, data=training, method="lda", metric=metric, trControl=control,na.action = na.pass)
+
+fit.lda <- train(res_name ~ res_volume_coverage + blob_volume_coverage + part_01_max + local_max + local_electrons + part_00_skewness + part_00_std + part_00_electrons + part_00_density_sqrt_E2 + part_00_density_sqrt_E3 + part_00_shape_Z_7_0 + part_00_shape_Z_7_1 + part_00_shape_Z_3_0 + part_00_shape_Z_5_2 + part_00_shape_Z_6_1 + part_00_shape_Z_3_1 + part_00_shape_Z_6_3 + part_00_shape_Z_6_2 + part_00_shape_Z_4_2 + part_00_density_Z_7_3 + part_00_density_Z_7_0 +  part_00_density_Z_2_1 + part_00_density_Z_6_3 + part_00_density_Z_4_2 + part_01_max + part_01_skewness + part_01_shape_O5_norm + part_01_shape_FL_norm + part_01_shape_E3_E1 + skeleton_diameter + local_mean + part_00_density_segments_count + part_00_shape_segments_count, data=training, method="lda", metric=metric, trControl=control,na.action = na.pass)
+
+fit.lda
+```
+
+### Knn
+```{r}
+fit.knn <- train(res_name~ res_volume_coverage + blob_volume_coverage + part_01_max + local_max + local_electrons + part_00_skewness + part_00_std + part_00_electrons + part_00_density_sqrt_E2 + part_00_density_sqrt_E3 + part_00_shape_Z_7_0 + part_00_shape_Z_7_1 + part_00_shape_Z_3_0 + part_00_shape_Z_5_2 + part_00_shape_Z_6_1 + part_00_shape_Z_3_1 + part_00_shape_Z_6_3 + part_00_shape_Z_6_2 + part_00_shape_Z_4_2 + part_00_density_Z_7_3 + part_00_density_Z_7_0 +  part_00_density_Z_2_1 + part_00_density_Z_6_3 + part_00_density_Z_4_2 + part_01_max + part_01_skewness + part_01_shape_O5_norm + part_01_shape_FL_norm + part_01_shape_E3_E1 + skeleton_diameter + local_mean + part_00_density_segments_count, data=training, method="knn", metric=metric, trControl=control,na.action = na.pass)
+
+fit.knn
+```
